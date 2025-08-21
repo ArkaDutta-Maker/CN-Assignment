@@ -72,9 +72,8 @@ public:
         }
         if (n < 0)
             perror("recv");
-            cerr << "Malformed payload: expected a newline separating header and body, but none was found.\n";
-            cerr << "Received payload: \"" << buf << "\"\n";
-            return;
+
+        size_t nl = buf.find('\n');
         if (nl == string::npos)
         {
             cerr << "Malformed payload (no header newline)\n";
@@ -125,22 +124,14 @@ public:
         if (scheme == "checksum16")
         {
             ok = checksum16_verify(body);
+        }
         else if (is_crc_scheme(scheme))
         {
-            auto crc_map = crc_generators();
-            if (crc_map.count(scheme))
-            {
-                ok = crc_verify_codeword(body, crc_map.at(scheme));
-            }
-            else
-            {
-                cerr << "[Server] Unknown CRC scheme received: '" << scheme << "'\n";
-            }
+            ok = crc_verify_codeword(body, crc_generators().at(scheme));
         }
         else
         {
-            cerr << "[Server] Unknown scheme received: '" << scheme << "'\n";
-        }
+            cerr << "[Server] Unknown scheme.\n";
         }
 
         cout << "[Server] Validation: " << (ok ? "ACCEPT (no error detected)" : "REJECT (error detected)") << "\n";
