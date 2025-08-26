@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include "common.h"
 #include "error_injector.h"
+#include <netinet/ether.h>
 
 using namespace std;
 
@@ -12,13 +13,14 @@ class Client
     sockaddr_in serv{};
     string ip;
     int port;
+    struct ifreq ifr{};
 
 public:
     Client(const string &ip, int port)
     {
         this->ip = ip;
         this->port = port;
-        sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
         if (sockfd < 0)
         {
             perror("socket");
@@ -81,8 +83,12 @@ public:
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
         int client_port = ntohs(client_addr.sin_port);
 
-        hdr << "scheme=" << scheme
-            << ";receiver_ip=" << this->ip << ";receiver_port=" << this->port << ";client_ip=" << client_ip << ";client_port=" << to_string(client_port) << ";error_type=" << (injected ? errorTypeName(etype) : "none")
+        unsigned char *mac = get_mac_address(this->sockfd, this->ifr, "eth0");
+        string sender_mac = ether_ntoa((struct ether_addr *)mac);
+
+        string receiver_mac = "00:00:00:00:00:00";
+        hdr << "scheme=" << scheme << ";receiver_mac=" << receiver_mac
+            << ";receiver_ip=" << this->ip << ";receiver_port=" << this->port << ";client_mac=" << sender_mac << ";client_port=" << to_string(client_port) << ";error_type=" << (injected ? errorTypeName(etype) : "none")
             << ";data_len=" << data_len_bits
             << "\n";
 
@@ -167,7 +173,7 @@ int main(int argc, char **argv)
         if (a == "--random" && i + 1 < argc)
         {
             string v = argv[++i];
-            inject = (v == "yes" || v == "y" || v == "true" || v == "1");
+            random = (v == "yes" || v == "y" || v == "true" || v == "1");
         }
     }
 
@@ -183,9 +189,10 @@ int main(int argc, char **argv)
     }
     if (random)
     {
-        srand((unsigned)time(nullptr));
         while (true)
         {
+            srand((unsigned)time(nullptr));
+
             string data_bits = Client::read_bits_file(file);
             if (data_bits.empty())
             {
@@ -193,18 +200,52 @@ int main(int argc, char **argv)
                 return 1;
             }
             string codeword = Client::make_codeword(scheme, data_bits);
-
-            ErrorInjector inj;
-            ErrorType etype = ErrorType::BURST;
-
-            codeword = inj.inject(codeword, etype);
-            Client s(ip, port);
-
-            if (s.send_payload(scheme, codeword, true, etype, to_string(data_bits.size())))
+            int len = -1;
+            if (scheme == "checksum16")
             {
-                cout << scheme << "\n"
-                     << codeword << "\n";
-                break;
+                ErrorInjector inj(len);
+                ErrorType etype = ErrorType::TWO_ISOLATED;
+
+                codeword = inj.inject(codeword, etype);
+                Client s(ip, port);
+
+                if (s.send_payload(scheme, codeword, true, etype, to_string(data_bits.size())))
+                {
+                    cout << scheme << "\n"
+                         << codeword << "\n";
+                    break;
+                }
+            }
+            else
+            {
+                if (scheme == "crc8")
+                {
+                    len = 9;
+                }
+                if (scheme == "crc10")
+                {
+                    len = 11;
+                }
+                if (scheme == "crc16")
+                {
+                    len = 17;
+                }
+                if (scheme == "crc32")
+                {
+                    len = 33;
+                }
+                ErrorInjector inj(len);
+                ErrorType etype = ErrorType::BURST;
+
+                codeword = inj.inject(codeword, etype);
+                Client s(ip, port);
+
+                if (s.send_payload(scheme, codeword, true, etype, to_string(data_bits.size())))
+                {
+                    cout << scheme << "\n"
+                         << codeword << "\n";
+                    break;
+                }
             }
         }
         return 0;

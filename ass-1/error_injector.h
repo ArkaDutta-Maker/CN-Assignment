@@ -28,8 +28,13 @@ inline const char *errorTypeName(ErrorType t)
 
 class ErrorInjector
 {
+    int lenf;
+
 public:
-    ErrorInjector() { srand((unsigned)time(nullptr)); }
+    ErrorInjector(int len = -1) : lenf(len)
+    {
+        srand((unsigned)time(nullptr));
+    }
 
     string inject(const string &in, ErrorType type)
     {
@@ -87,7 +92,12 @@ public:
             }
 
             int start = rand() % (n - 3);
-            int len = 3 + rand() % 32;
+            int len = -1;
+            if (this->lenf == -1)
+                len = 3 + rand() % 32;
+            else
+                len = this->lenf;
+
             int end = min(start + len, n);
 
             cerr << "[Injector] BURST window start=" << start

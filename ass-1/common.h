@@ -1,6 +1,43 @@
 #pragma once
 #include <bits/stdc++.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <unistd.h>
+#include <netinet/in.h>
 using namespace std;
+#include <net/if_arp.h>
+
+string get_mac_from_ip(int sockfd, const string &ip, const char *iface)
+{
+    struct arpreq req{};
+    struct sockaddr_in *sin = (struct sockaddr_in *)&req.arp_pa;
+
+    // Fill in IP
+    sin->sin_family = AF_INET;
+    if (inet_pton(AF_INET, ip.c_str(), &sin->sin_addr) <= 0)
+    {
+        perror("inet_pton for ARP");
+        return "";
+    }
+
+    // Interface to use (e.g., "eth0" or "wlan0")
+    strncpy(req.arp_dev, iface, sizeof(req.arp_dev) - 1);
+
+    if (ioctl(sockfd, SIOCGARP, &req) == -1)
+    {
+        perror("ioctl SIOCGARP");
+        return "";
+    }
+
+    unsigned char *mac = (unsigned char *)req.arp_ha.sa_data;
+    char mac_str[18];
+    snprintf(mac_str, sizeof(mac_str),
+             "%02x:%02x:%02x:%02x:%02x:%02x",
+             mac[0], mac[1], mac[2],
+             mac[3], mac[4], mac[5]);
+
+    return string(mac_str);
+}
 
 // ---------- Bitstring helpers ----------
 inline string trim01(const string &s)
@@ -51,7 +88,16 @@ inline string checksum16_append(const string &data_bits)
 
     return padded + checksum;
 }
-
+unsigned char *get_mac_address(int sockfd, struct ifreq &ifr, const char *iface)
+{
+    strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
+    if (ioctl(sockfd, SIOCGIFHWADDR, &ifr) == -1)
+    {
+        perror("ioctl");
+        exit(1);
+    }
+    return (unsigned char *)ifr.ifr_hwaddr.sa_data;
+}
 inline bool checksum16_verify(const string &full_bits_in)
 {
     string s = full_bits_in;

@@ -2,16 +2,18 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include "common.h"
+#include <netinet/ether.h>
 
 using namespace std;
 #define PAYLOAD_SIZE 64
-class Server
+class Receiver
 {
     int listenfd{-1};
     sockaddr_in addr{};
+    struct ifreq ifr{};
 
 public:
-    Server(int port)
+    Receiver(int port)
     {
         listenfd = socket(AF_INET, SOCK_STREAM, 0);
         if (listenfd < 0)
@@ -40,10 +42,10 @@ public:
             perror("listen");
             exit(1);
         }
-        cout << "[Server] Listening on port " << port << " ...\n";
+        cout << "[Receiver] Listening on port " << port << " ...\n";
     }
 
-    ~Server()
+    ~Receiver()
     {
         if (listenfd >= 0)
             close(listenfd);
@@ -59,7 +61,7 @@ public:
             perror("accept");
             return;
         }
-        cout << "[Server] Client connected.\n";
+        cout << "[Receiver] Client connected.\n";
 
         string buf;
         char tmp[8 * PAYLOAD_SIZE];
@@ -109,7 +111,10 @@ public:
                 }
             }
         }
+        unsigned char *mac = get_mac_address(this->listenfd, this->ifr, "eth0");
+        string sender_mac = ether_ntoa((struct ether_addr *)mac);
 
+        cout << "[Receiver] MAC: " << sender_mac << "\n";
         string scheme = H.count("scheme") ? H["scheme"] : "";
         string client_ip = H.count("client_ip") ? H["client_ip"] : "";
 
@@ -117,9 +122,9 @@ public:
         string etype = H.count("error_type") ? H["error_type"] : "none";
         string data_len = H.count("data_len") ? H["data_len"] : "?";
         // cout << body << "\n";
-        cout << "[Server] Header: " << header << "\n";
-        cout << "[Server] Body bits length: " << body.size() << "\n";
-        cout << "[Server] Client ip: " << client_ip << "\n";
+        cout << "[Receiver] Header: " << header << "\n";
+        cout << "[Receiver] Body bits length: " << body.size() << "\n";
+        cout << "[Receiver] Client ip: " << client_ip << "\n";
         bool ok = false;
         if (scheme == "checksum16")
         {
@@ -131,11 +136,11 @@ public:
         }
         else
         {
-            cerr << "[Server] Unknown scheme.\n";
+            cerr << "[Receiver] Unknown scheme.\n";
         }
 
-        cout << "[Server] Validation: " << (ok ? "ACCEPT (no error detected)" : "REJECT (error detected)") << "\n";
-        cout << "[Server] Meta:error_type=" << etype << "\n";
+        cout << "[Receiver] Validation: " << (ok ? "ACCEPT (no error detected)" : "REJECT (error detected)") << "\n";
+        cout << "[Receiver] Meta:error_type=" << etype << "\n";
         string ack = (ok ? "ACCEPT (no error detected)" : "REJECT (error detected)");
         send(fd, ack.c_str(), ack.size(), 0);
         cout << "\nACK sent\n";
@@ -145,7 +150,7 @@ public:
 
 static void usage()
 {
-    cerr << "Usage: ./Server <port>\n";
+    cerr << "Usage: ./Receiver <port>\n";
 }
 
 int main(int argc, char **argv)
@@ -156,7 +161,7 @@ int main(int argc, char **argv)
         return 1;
     }
     int port = stoi(argv[1]);
-    Server r(port);
+    Receiver r(port);
     // Serve one message per run (simple lab demo). Re-run to test again.
     while (true)
         r.serve_once();
