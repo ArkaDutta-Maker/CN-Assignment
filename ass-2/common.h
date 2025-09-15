@@ -1,131 +1,41 @@
 #pragma once
-#include <bits/stdc++.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
-#include <unistd.h>
-#include <netinet/in.h>
-#include <net/if_arp.h>
+#include <cstdint>
+#include <string>
+#include <vector>
 
-using namespace std;
+extern const uint8_t SENDER_ADDR[6];
+extern const uint8_t RECEIVER_ADDR[6];
 
-// ---------- Bitstring helpers ----------
-inline string trim01(const string &s)
+struct FrameHeader
 {
-    string t;
-    t.reserve(s.size());
-    for (char c : s)
-        if (c == '0' || c == '1')
-            t.push_back(c);
-    return t;
-}
+    uint8_t src[6];
+    uint8_t dest[6];
+    uint16_t length;
+    uint8_t seq;
+} __attribute__((packed));
 
-inline string u16_to_bits(uint16_t x)
+using Crc32 = uint32_t;
+
+struct Frame
 {
-    string b;
-    b.reserve(16);
-    for (int i = 15; i >= 0; --i)
-        b.push_back(((x >> i) & 1) + '0');
-    return b;
-}
+    FrameHeader hdr;
+    std::string payload;
+    Crc32 crc;
+};
 
-inline uint16_t bits_to_u16(const string &b)
-{
-    uint16_t v = 0;
-    for (char c : b)
-        v = (v << 1) | (c == '1');
-    return v;
-}
+// ---- CRC ----
+uint32_t compute_crc(const std::vector<uint8_t> &bytes, int widthBits);
 
-inline string checksum16_append(const string &data_bits)
-{
-    string padded = data_bits;
-    size_t rem = padded.size() % 16;
-    if (rem != 0)
-        padded.append(16 - rem, '0');
+void fill_header(FrameHeader &h, const uint8_t src[6], const uint8_t dest[6],
+                 uint16_t length, uint8_t seq);
 
-    uint32_t sum = 0;
-    for (size_t i = 0; i < padded.size(); i += 16)
-    {
-        uint16_t val = bits_to_u16(padded.substr(i, 16));
-        sum += val;
-        while (sum >> 16)
-            sum = (sum & 0xFFFF) + (sum >> 16);
-    }
+void append_header(std::vector<uint8_t> &out, const FrameHeader &h);
+void append_payload(std::vector<uint8_t> &out, const std::string &p);
+void append_crc(std::vector<uint8_t> &out, Crc32 c);
 
-    uint16_t csum = static_cast<uint16_t>(~sum);
-    string checksum = u16_to_bits(csum);
+std::vector<uint8_t> bytes_for_crc(const FrameHeader &h, const std::string &payload);
 
-    return padded + checksum;
-}
-unsigned char *get_mac_address(int sockfd, struct ifreq &ifr, const char *iface)
-{
-    strncpy(ifr.ifr_name, iface, IFNAMSIZ - 1);
-    if (ioctl(sockfd, SIOCGIFHWADDR, &ifr) == -1)
-    {
-        perror("ioctl");
-        exit(1);
-    }
-    return (unsigned char *)ifr.ifr_hwaddr.sa_data;
-}
-inline bool checksum16_verify(const string &full_bits_in)
-{
-    string s = full_bits_in;
-    size_t rem = s.size() % 16;
-    if (rem != 0)
-        s.append(16 - rem, '0');
+bool read_exact(int fd, void *buf, size_t n);
+bool write_exact(int fd, const void *buf, size_t n);
 
-    uint32_t sum = 0;
-    for (size_t i = 0; i < s.size(); i += 16)
-    {
-        uint16_t val = bits_to_u16(s.substr(i, 16));
-        sum += val;
-        while (sum >> 16)
-            sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-    return static_cast<uint16_t>(sum) == 0xFFFF;
-}
-
-inline string crc_divide(string bits, const string &gen)
-{
-    int m = (int)gen.size();
-    for (int i = 0; i <= (int)bits.size() - m; ++i)
-    {
-        if (bits[i] == '1')
-        {
-            for (int j = 0; j < m; ++j)
-            {
-                bits[i + j] = (bits[i + j] == gen[j]) ? '0' : '1';
-            }
-        }
-    }
-    return bits.substr(bits.size() - (m - 1));
-}
-
-inline string crc_make_codeword(const string &data_bits, const string &gen)
-{
-    string appended = data_bits + string(gen.size() - 1, '0');
-    string rem = crc_divide(appended, gen);
-    return data_bits + rem;
-}
-
-inline bool crc_verify_codeword(const string &codeword, const string &gen)
-{
-    string rem = crc_divide(codeword, gen);
-    return rem.find('1') == string::npos;
-}
-
-inline const unordered_map<string, string> &crc_generators()
-{
-    static const unordered_map<string, string> m = {
-        {"crc8", "100000111"},          // x^8 + x^7 + x^6 + x^4 + x^2 + 1
-        {"crc10", "11000110011"},       // x^10 + x^9 + x^5 + x^4 + x + 1
-        {"crc16", "11000000000000101"}, // x^16 + x^15 + x^2 + 1
-        {"crc32", "100000100110000010001110110110111"}};
-    return m;
-}
-
-inline bool is_crc_scheme(const string &s)
-{
-    auto &m = crc_generators();
-    return m.find(s) != m.end();
-}
+bool is_supported_crc(int widthBits);

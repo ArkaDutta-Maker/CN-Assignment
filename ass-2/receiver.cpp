@@ -1,151 +1,174 @@
-#include <bits/stdc++.h>
+#include "common.h"
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <random>
+#include <vector>
+#include <map>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <netinet/ether.h>
-#include <net/if.h>
-#include "frame.h"
-#include "error_injector.h"
 
-using namespace std;
+static constexpr int PORT = 9090;
 
-#define MAX_FRAME_SIZE 1500
-
-class Receiver
+int main()
 {
-    int listenfd{-1};
+    int crcBits, windowSize = 1;
+    std::string flow;
+
+    std::cout << "[Receiver] CRC width: ";
+    std::cin >> crcBits;
+    if (!is_supported_crc(crcBits))
+        return 1;
+    std::cout << "[Receiver] Flow control (stop | gbn | sr): ";
+    std::cin >> flow;
+    if (flow == "gbn" || flow == "sr")
+    {
+        std::cout << "[Receiver] Window size: ";
+        std::cin >> windowSize;
+    }
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int> jitterMs(50, 300);       // jitter in ms
+    std::uniform_real_distribution<float> dropProb(0.0f, 1.0f); // for drop simulation
+
+    int srv = socket(AF_INET, SOCK_STREAM, 0);
+    int opt = 1;
+    setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
     sockaddr_in addr{};
-    struct ifreq ifr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-public:
-    Receiver(int port)
+    if (bind(srv, (sockaddr *)&addr, sizeof(addr)) < 0)
     {
-        listenfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (listenfd < 0)
-        {
-            perror("socket");
-            exit(1);
-        }
-
-        int opt = 1;
-        if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
-        {
-            perror("setsockopt");
-            exit(1);
-        }
-
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;
-        addr.sin_port = htons(port);
-
-        if (bind(listenfd, (sockaddr *)&addr, sizeof(addr)) < 0)
-        {
-            perror("bind");
-            exit(1);
-        }
-        if (listen(listenfd, 1) < 0)
-        {
-            perror("listen");
-            exit(1);
-        }
-
-        cout << "[Receiver] Listening on port " << port << " ...\n";
-    }
-
-    ~Receiver()
-    {
-        if (listenfd >= 0)
-            close(listenfd);
-    }
-
-    vector<unsigned char> Recv(int fd)
-    {
-        vector<unsigned char> buf(MAX_FRAME_SIZE);
-        ssize_t n = recv(fd, buf.data(), buf.size(), 0);
-        if (n <= 0)
-        {
-            if (n < 0)
-                perror("recv");
-            return {};
-        }
-        buf.resize(n);
-        return buf;
-    }
-
-    bool Check(const Frame &f, const string &scheme)
-    {
-        return f.verify(scheme);
-    }
-
-    void Send(int fd, bool ok, uint8_t seqNo)
-    {
-        string ack = ok ? "ACK:" + to_string(seqNo) : "NAK:" + to_string(seqNo);
-        send(fd, ack.c_str(), ack.size(), 0);
-        cout << "[Receiver] Sent " << (ok ? "ACK" : "NAK") << " for seq=" << int(seqNo) << "\n";
-    }
-
-    void serve_once()
-    {
-        sockaddr_in cli{};
-        socklen_t clen = sizeof(cli);
-        int fd = accept(listenfd, (sockaddr *)&cli, &clen);
-        if (fd < 0)
-        {
-            perror("accept");
-            return;
-        }
-        cout << "[Receiver] Client connected.\n";
-
-        auto raw = Recv(fd);
-        if (raw.empty())
-        {
-            close(fd);
-            return;
-        }
-
-        if (raw.size() < 12)
-        {
-            cerr << "[Receiver] Frame too short!\n";
-            close(fd);
-            return;
-        }
-
-        Frame f;
-        memcpy(f.srcMAC, raw.data(), 6);
-        memcpy(f.destMAC, raw.data() + 6, 6);
-        f.length = ntohs(*(uint16_t *)(raw.data() + 12));
-        f.seqNo = raw[14];
-        f.payload.assign(raw.begin() + 15, raw.begin() + 15 + f.length);
-        f.fcs = ntohl(*(uint32_t *)(raw.data() + 15 + f.length));
-
-        string scheme = "checksum16";
-        cout << "[Receiver] Received frame seq=" << int(f.seqNo) << ", payload bytes=" << f.payload.size() << "\n";
-
-        bool ok = Check(f, scheme);
-        cout << "[Receiver] Validation: " << (ok ? "ACCEPT" : "REJECT") << "\n";
-
-        Send(fd, ok, f.seqNo);
-        close(fd);
-    }
-};
-
-static void usage()
-{
-    cerr << "Usage: ./Receiver <port>\n";
-}
-
-int main(int argc, char **argv)
-{
-    if (argc != 2)
-    {
-        usage();
+        perror("bind");
         return 1;
     }
+    if (listen(srv, 1) < 0)
+    {
+        perror("listen");
+        return 1;
+    }
+    std::cout << "[Receiver] Listening...\n";
 
-    int port = stoi(argv[1]);
-    Receiver r(port);
+    int fd = accept(srv, nullptr, nullptr);
+    if (fd < 0)
+    {
+        perror("accept");
+        return 1;
+    }
+    std::cout << "[Receiver] Connection established.\n";
+
+    uint8_t expectedGbn = 0;
+    uint8_t expectedSr = 0;
+    std::map<uint8_t, std::string> srBuffer; // buffer for out-of-order SR frames
 
     while (true)
-        r.serve_once();
+    {
+        FrameHeader h;
+        if (!read_exact(fd, &h, sizeof(h)))
+        {
+            std::cout << "[Receiver] Closed.\n";
+            break;
+        }
+        uint16_t len = ntohs(h.length);
 
+        std::string payload(len, '\0');
+        if (!read_exact(fd, payload.data(), len))
+            break;
+
+        uint32_t wireCrcBE;
+        if (!read_exact(fd, &wireCrcBE, sizeof(wireCrcBE)))
+            break;
+        uint32_t rxCrc = ntohl(wireCrcBE);
+
+        auto bytes = bytes_for_crc(h, payload);
+        uint32_t calc = compute_crc(bytes, crcBits);
+        bool ok = ((rxCrc & ((crcBits == 32) ? 0xFFFFFFFFu : ((1u << crcBits) - 1u))) ==
+                   (calc & ((crcBits == 32) ? 0xFFFFFFFFu : ((1u << crcBits) - 1u))));
+
+        // apply jitter
+        std::this_thread::sleep_for(std::chrono::milliseconds(jitterMs(gen)));
+
+        // random drop simulation
+        if (dropProb(gen) < 0.5f) // 10% chance
+        {
+            ok = false;
+            std::cout << "[Receiver] Random drop seq=" << (int)h.seq << "\n";
+        }
+
+        uint8_t seq = h.seq;
+
+        if (flow == "stop")
+        {
+            if (ok)
+            {
+                uint8_t ack[3] = {0xAC, seq, 1};
+                write_exact(fd, ack, sizeof(ack));
+                std::cout << "[Receiver] ACK seq=" << (int)seq << "\n";
+            }
+            else
+            {
+                std::cout << "[Receiver] Dropped seq=" << (int)seq << "\n";
+            }
+        }
+        else if (flow == "gbn")
+        {
+            if (ok && seq == expectedGbn)
+            {
+                std::cout << "[Receiver] Delivered seq=" << (int)seq
+                          << " payload='" << payload << "'\n";
+
+                uint8_t ack[3] = {0xAC, seq, 1}; // ACK
+                write_exact(fd, ack, sizeof(ack));
+                std::cout << "[Receiver] Cumulative ACK seq=" << (int)seq << "\n";
+
+                ++expectedGbn;
+            }
+            else
+            {
+                // Out-of-order frames are ignored, send ACK of last in-order received frame
+                uint8_t ack[3] = {0xAC, (uint8_t)(expectedGbn - 1), 1};
+                write_exact(fd, ack, sizeof(ack));
+                std::cout << "[Receiver] Duplicate ACK seq=" << (int)(expectedGbn - 1) << "\n";
+            }
+        }
+        else if (flow == "sr")
+        {
+            if (ok)
+            {
+                if (srBuffer.find(seq) == srBuffer.end())
+                {
+                    srBuffer[seq] = payload;
+                    std::cout << "[Receiver] Buffered seq=" << (int)seq << "\n";
+                }
+
+                uint8_t ack[3] = {0xAC, seq, 1};
+                write_exact(fd, ack, sizeof(ack));
+                std::cout << "[Receiver] ACK seq=" << (int)seq << "\n";
+
+                // Deliver in-order frames
+                while (srBuffer.count(expectedSr))
+                {
+                    std::cout << "[Receiver] Delivered seq=" << (int)expectedSr
+                              << " payload='" << srBuffer[expectedSr] << "'\n";
+                    srBuffer.erase(expectedSr);
+                    ++expectedSr;
+                }
+            }
+            else
+            {
+                uint8_t nack[3] = {0xAC, seq, 0};
+                write_exact(fd, nack, sizeof(nack));
+                std::cout << "[Receiver] NACK seq=" << (int)seq << "\n";
+            }
+        }
+    }
+    close(fd);
+    close(srv);
     return 0;
 }

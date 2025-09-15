@@ -1,303 +1,232 @@
-#include <bits/stdc++.h>
+#include "common.h"
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <map>
+#include <chrono>
+#include <thread>
+#include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <net/if.h>
-#include <netinet/ether.h>
-#include "frame.h"
-#include "error_injector.h"
-using namespace std;
+#include <algorithm>
 
-class Client
+static constexpr int PORT = 9090;
+
+// Wait for ACK or NACK for SR/GBN
+bool wait_for_ack(int fd, uint8_t &seq, int timeoutMs, bool &isAck)
 {
-    int sockfd{-1};
-    sockaddr_in serv{};
-    string ip;
-    int port;
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(fd, &rfds);
 
-public:
-    Client(const string &ip, int port)
-    {
-        this->ip = ip;
-        this->port = port;
-        sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-        if (sockfd < 0)
-        {
-            perror("socket");
-            exit(1);
-        }
-        serv.sin_family = AF_INET;
-        serv.sin_port = htons(port);
-        if (inet_pton(AF_INET, ip.c_str(), &serv.sin_addr) <= 0)
-        {
-            perror("inet_pton");
-            exit(1);
-        }
-        if (connect(sockfd, (sockaddr *)&serv, sizeof(serv)) < 0)
-        {
-            perror("connect");
-            exit(1);
-        }
-    }
+    timeval tv{};
+    tv.tv_sec = timeoutMs / 1000;
+    tv.tv_usec = (timeoutMs % 1000) * 1000;
 
-    ~Client()
-    {
-        if (sockfd >= 0)
-            close(sockfd);
-    }
+    int r = select(fd + 1, &rfds, nullptr, nullptr, &tv);
+    if (r <= 0)
+        return false;
 
-    static string read_bits_file(const string &path)
-    {
-        ifstream f(path);
-        if (!f)
-        {
-            perror("open file");
-            exit(1);
-        }
-        string all, line;
-        while (getline(f, line))
-            all += line;
-        return trim01(all);
-    }
+    uint8_t ack[3];
+    if (!read_exact(fd, ack, sizeof(ack)))
+        return false;
 
-    static string make_codeword(const string &scheme, const string &bits)
-    {
-        if (scheme == "checksum16")
-            return checksum16_append(bits);
-        if (is_crc_scheme(scheme))
-            return crc_make_codeword(bits, crc_generators().at(scheme));
-        cerr << "Unknown scheme: " << scheme << "\n";
-        exit(1);
-    }
-
-    static void channel(Frame &f, double errorProb = 0.1)
-    {
-        int delay_ms = rand() % 500;
-        this_thread::sleep_for(chrono::milliseconds(delay_ms));
-
-        if ((rand() / (double)RAND_MAX) < errorProb)
-        {
-            ErrorInjector inj;
-            string bits = Frame::bytesToBits(f.payload);
-            string corrupted_bits = inj.inject(bits, ErrorType::BURST);
-            vector<unsigned char> newPayload;
-            for (size_t i = 0; i < corrupted_bits.size(); i += 8)
-            {
-                unsigned char b = 0;
-                for (int j = 0; j < 8 && i + j < corrupted_bits.size(); ++j)
-                    b |= (corrupted_bits[i + j] - '0') << (7 - j);
-                newPayload.push_back(b);
-            }
-            f.payload = newPayload;
-        }
-    }
-
-    bool sendFrame(Frame &f, const string &scheme)
-    {
-        Timer t(1000);
-        t.startTimer();
-
-        while (true)
-        {
-            vector<unsigned char> frame_bytes;
-            frame_bytes.insert(frame_bytes.end(), f.srcMAC, f.srcMAC + 6);
-            frame_bytes.insert(frame_bytes.end(), f.destMAC, f.destMAC + 6);
-            uint16_t len_net = htons(f.payload.size());
-            frame_bytes.push_back(len_net >> 8);
-            frame_bytes.push_back(len_net & 0xFF);
-            frame_bytes.push_back(f.seqNo);
-            frame_bytes.insert(frame_bytes.end(), f.payload.begin(), f.payload.end());
-            uint32_t fcs_net = htonl(f.fcs);
-            frame_bytes.push_back((fcs_net >> 24) & 0xFF);
-            frame_bytes.push_back((fcs_net >> 16) & 0xFF);
-            frame_bytes.push_back((fcs_net >> 8) & 0xFF);
-            frame_bytes.push_back(fcs_net & 0xFF);
-
-            ssize_t n = send(sockfd, frame_bytes.data(), frame_bytes.size(), 0);
-            if (n < 0)
-            {
-                perror("send");
-                return false;
-            }
-            cout << "[Client] Sent frame seq=" << int(f.seqNo) << ", " << n << " bytes\n";
-
-            fd_set readfds;
-            FD_ZERO(&readfds);
-            FD_SET(sockfd, &readfds);
-            timeval tv;
-            tv.tv_sec = t.getTimeout() / 1000;
-            tv.tv_usec = (t.getTimeout() % 1000) * 1000;
-
-            int rv = select(sockfd + 1, &readfds, NULL, NULL, &tv);
-            if (rv > 0 && FD_ISSET(sockfd, &readfds))
-            {
-                char ack_buf[64];
-                int val = recv(sockfd, ack_buf, sizeof(ack_buf) - 1, 0);
-                if (val > 0)
-                {
-                    ack_buf[val] = '\0';
-                    string ack(ack_buf);
-                    if (ack.find("ACK") != string::npos)
-                    {
-                        cout << "[Client] Received ACK for seq=" << int(f.seqNo) << "\n";
-                        return true;
-                    }
-                }
-            }
-
-            cout << "[Client] Timeout! Retransmitting frame seq=" << int(f.seqNo) << "\n";
-            t.startTimer();
-        }
-    }
-
-    void sendFrames(vector<vector<unsigned char>> &payloads, const string &scheme,
-                    FlowControlType flowType, int windowSize = 1)
-    {
-        struct ifreq ifr{};
-        unsigned char *mac = get_mac_address(sockfd, ifr, "eth0");
-        unsigned char destMAC[6] = {0};
-
-        uint8_t seq = 0;
-
-        if (flowType == FlowControlType::STOP_AND_WAIT)
-        {
-            for (auto &payload : payloads)
-            {
-                Frame f(mac, destMAC, seq++, payload, scheme);
-                Client::channel(f);
-                sendFrame(f, scheme);
-            }
-        }
-        else if (flowType == FlowControlType::GO_BACK_N)
-        {
-            size_t i = 0;
-            while (i < payloads.size())
-            {
-                size_t winEnd = min(i + windowSize, payloads.size());
-                vector<Frame> window;
-                for (size_t j = i; j < winEnd; ++j)
-                    window.emplace_back(mac, destMAC, seq++, payloads[j], scheme);
-
-                for (auto &f : window)
-                {
-                    Client::channel(f);
-                    send(sockfd, f.payload.data(), f.payload.size(), 0);
-                }
-
-                char ack_buf[64];
-                int val = recv(sockfd, ack_buf, sizeof(ack_buf) - 1, 0);
-                if (val > 0)
-                {
-                    ack_buf[val] = '\0';
-                    string ack(ack_buf);
-                    if (ack.find("ACK") != string::npos)
-                    {
-                        i += window.size();
-                        continue;
-                    }
-                }
-            }
-        }
-        else if (flowType == FlowControlType::SELECTIVE_REPEAT)
-        {
-            size_t i = 0;
-            map<uint8_t, Frame> window;
-            map<uint8_t, bool> acked;
-            while (i < payloads.size() || !window.empty())
-            {
-                while (window.size() < windowSize && i < payloads.size())
-                {
-                    Frame f(mac, destMAC, seq++, payloads[i], scheme);
-                    Client::channel(f);
-                    sendFrame(f, scheme);
-                    window[f.seqNo] = f;
-                    acked[f.seqNo] = false;
-                    i++;
-                }
-
-                char ack_buf[64];
-                int val = recv(sockfd, ack_buf, sizeof(ack_buf) - 1, 0);
-                if (val > 0)
-                {
-                    ack_buf[val] = '\0';
-                    string ack(ack_buf);
-                    if (ack.find("ACK") != string::npos)
-                    {
-                        uint8_t ackSeq = stoi(ack.substr(4));
-                        if (window.count(ackSeq))
-                            acked[ackSeq] = true;
-                    }
-                }
-
-                for (auto &[seqNum, f] : window)
-                    if (!acked[seqNum])
-                        sendFrame(f, scheme);
-
-                for (auto it = window.begin(); it != window.end();)
-                {
-                    if (acked[it->first])
-                        it = window.erase(it);
-                    else
-                        ++it;
-                }
-            }
-        }
-    }
-};
-
-static void usage()
-{
-    cerr << "Usage:\n"
-            "  ./client <server_ip> <port> <input_bits_file> --scheme <checksum16|crc8|crc10|crc16|crc32> "
-            "--flow <stop|gbn|sr> [--window N]\n";
+    seq = ack[1];
+    isAck = (ack[2] == 1);
+    return true;
 }
 
-int main(int argc, char **argv)
+int main()
 {
-    if (argc < 7)
+    std::string path, flow;
+    int payloadLen, crcBits, timeoutMs, windowSize = 1;
+
+    std::cout << "[Sender] Enter bitstream file: ";
+    std::cin >> path;
+    std::cout << "[Sender] Payload size per frame: ";
+    std::cin >> payloadLen;
+    std::cout << "[Sender] CRC width (8/10/16/32): ";
+    std::cin >> crcBits;
+    std::cout << "[Sender] ACK timeout (ms): ";
+    std::cin >> timeoutMs;
+    std::cout << "[Sender] Flow control (stop | gbn | sr): ";
+    std::cin >> flow;
+
+    if (flow == "gbn" || flow == "sr")
     {
-        usage();
-        return 1;
+        std::cout << "[Sender] Window size: ";
+        std::cin >> windowSize;
     }
 
-    string ip = argv[1];
-    int port = stoi(argv[2]);
-    string file = argv[3];
-    string scheme = argv[5];
-    string flow = argv[7];
-    int windowSize = 1;
-    if (argc >= 10)
-        windowSize = stoi(argv[9]);
+    if (!is_supported_crc(crcBits) || payloadLen <= 0 || windowSize <= 0)
+        return 1;
 
-    string bits = Client::read_bits_file(file);
+    // Load bitstream
+    std::ifstream fin(path);
+    std::string raw((std::istreambuf_iterator<char>(fin)), std::istreambuf_iterator<char>());
+    std::string bits;
+    std::copy_if(raw.begin(), raw.end(), std::back_inserter(bits),
+                 [](char c)
+                 { return c == '0' || c == '1'; });
     if (bits.empty())
     {
-        cerr << "Input file has no bits!\n";
+        std::cerr << "No bits found\n";
         return 1;
     }
 
-    vector<vector<unsigned char>> payloads;
-    size_t chunk_size = 46;
-    for (size_t i = 0; i < bits.size(); i += chunk_size)
+    // Prepare frames
+    struct FrameInfo
     {
-        vector<unsigned char> payload;
-        for (size_t j = 0; j < chunk_size && i + j < bits.size(); j += 8)
-        {
-            unsigned char b = 0;
-            for (int k = 0; k < 8 && i + j + k < bits.size(); ++k)
-                b |= (bits[i + j + k] - '0') << (7 - k);
-            payload.push_back(b);
-        }
-        payloads.push_back(payload);
+        Frame frame;
+        std::vector<uint8_t> wire;
+        bool acked = false;
+        std::chrono::steady_clock::time_point lastSent;
+    };
+    std::vector<FrameInfo> frames;
+    uint8_t seq = 0;
+    for (size_t i = 0; i < bits.size(); i += payloadLen, ++seq)
+    {
+        std::string chunk = bits.substr(i, payloadLen);
+        Frame f{};
+        fill_header(f.hdr, SENDER_ADDR, RECEIVER_ADDR, (uint16_t)chunk.size(), seq);
+        f.payload = chunk;
+        f.crc = compute_crc(bytes_for_crc(f.hdr, f.payload), crcBits);
+
+        std::vector<uint8_t> wire;
+        append_header(wire, f.hdr);
+        append_payload(wire, f.payload);
+        append_crc(wire, f.crc);
+
+        frames.push_back({f, wire});
     }
 
-    Client client(ip, port);
-    FlowControlType flowType = FlowControlType::STOP_AND_WAIT;
-    if (flow == "gbn")
-        flowType = FlowControlType::GO_BACK_N;
+    // Connect to receiver
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    if (connect(fd, (sockaddr *)&addr, sizeof(addr)) < 0)
+    {
+        perror("connect");
+        return 1;
+    }
+
+    std::cout << "[Sender] Connected. Starting transmission...\n";
+
+    if (flow == "stop")
+    {
+        for (auto &f : frames)
+        {
+            bool acked = false;
+            while (!acked)
+            {
+                write_exact(fd, f.wire.data(), f.wire.size());
+                uint8_t ackSeq;
+                bool isAck;
+                if (wait_for_ack(fd, ackSeq, timeoutMs, isAck) && isAck && ackSeq == f.frame.hdr.seq)
+                {
+                    acked = true;
+                    std::cout << "[Sender] ACK received seq=" << (int)ackSeq << "\n";
+                }
+                else
+                {
+                    std::cout << "[Sender] Timeout seq=" << (int)f.frame.hdr.seq << " → retransmit\n";
+                }
+            }
+        }
+    }
+    else if (flow == "gbn")
+    {
+        size_t base = 0;
+        size_t nextFrame = 0;
+
+        while (base < frames.size())
+        {
+            // Send frames in window
+            while (nextFrame < base + windowSize && nextFrame < frames.size())
+            {
+                write_exact(fd, frames[nextFrame].wire.data(), frames[nextFrame].wire.size());
+                frames[nextFrame].lastSent = std::chrono::steady_clock::now();
+                std::cout << "[Sender] Sent seq=" << (int)frames[nextFrame].frame.hdr.seq << "\n";
+                ++nextFrame;
+            }
+
+            uint8_t ackSeq;
+            bool isAck;
+            if (wait_for_ack(fd, ackSeq, timeoutMs, isAck) && isAck)
+            {
+                if (ackSeq >= base && ackSeq < base + windowSize)
+                {
+                    size_t shift = ackSeq - base + 1;
+                    std::cout << "[Sender] Cumulative ACK received seq=" << (int)ackSeq << "\n";
+                    base += shift;
+                }
+            }
+            else
+            {
+                std::cout << "[Sender] Timeout window starting seq=" << (int)frames[base].frame.hdr.seq << " → retransmit\n";
+                nextFrame = base;
+            }
+        }
+    }
+
     else if (flow == "sr")
-        flowType = FlowControlType::SELECTIVE_REPEAT;
+    {
+        size_t nextFrame = 0;
+        std::vector<bool> acked(frames.size(), false);
 
-    client.sendFrames(payloads, scheme, flowType, windowSize);
+        while (nextFrame < frames.size())
+        {
+            auto now = std::chrono::steady_clock::now();
+            for (size_t i = 0; i < frames.size(); ++i)
+            {
+                if (acked[i])
+                    continue;
 
+                bool neverSent = (frames[i].lastSent == std::chrono::steady_clock::time_point{});
+
+                long long elapsedMs = neverSent ? 0
+                                                : std::chrono::duration_cast<std::chrono::milliseconds>(now - frames[i].lastSent).count();
+
+                if (neverSent || elapsedMs >= timeoutMs)
+                {
+                    write_exact(fd, frames[i].wire.data(), frames[i].wire.size());
+                    frames[i].lastSent = now;
+                    if (neverSent)
+                        std::cout << "[Sender] Initial send seq=" << (int)frames[i].frame.hdr.seq << "\n";
+                    else
+                        std::cout << "[Sender] Timeout retransmit seq=" << (int)frames[i].frame.hdr.seq << " (elapsed=" << elapsedMs << " ms)\n";
+                }
+            }
+
+            uint8_t ackSeq;
+            bool isAck;
+            if (wait_for_ack(fd, ackSeq, timeoutMs, isAck))
+            {
+                if (ackSeq >= frames.size())
+                    continue;
+
+                if (isAck)
+                {
+                    acked[ackSeq] = true;
+                    std::cout << "[Sender] ACK received seq=" << (int)ackSeq << "\n";
+                }
+                else
+                {
+                    write_exact(fd, frames[ackSeq].wire.data(), frames[ackSeq].wire.size());
+                    frames[ackSeq].lastSent = std::chrono::steady_clock::now();
+                    std::cout << "[Sender] NACK seq=" << (int)ackSeq << " → retransmit\n";
+                }
+            }
+
+            // Advance nextFrame pointer
+            while (nextFrame < frames.size() && acked[nextFrame])
+                ++nextFrame;
+        }
+    }
+
+    std::cout << "[Sender] Transmission complete.\n";
+    close(fd);
     return 0;
 }
