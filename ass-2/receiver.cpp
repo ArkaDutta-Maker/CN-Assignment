@@ -95,7 +95,7 @@ int main()
         std::this_thread::sleep_for(std::chrono::milliseconds(jitterMs(gen)));
 
         // random drop simulation
-        if (dropProb(gen) < 0.5f) // 10% chance
+        if (dropProb(gen) < 0.0f) // 10% chance
         {
             ok = false;
             std::cout << "[Receiver] Random drop seq=" << (int)h.seq << "\n";
