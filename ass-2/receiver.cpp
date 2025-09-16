@@ -28,7 +28,9 @@ int main()
         std::cout << "[Receiver] Window size: ";
         std::cin >> windowSize;
     }
-
+    double drop_val;
+    std::cout << "[Receiver] Drop Probability: ";
+    std::cin >> drop_val;
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<int> jitterMs(50, 300);       // jitter in ms
@@ -95,7 +97,7 @@ int main()
         std::this_thread::sleep_for(std::chrono::milliseconds(jitterMs(gen)));
 
         // random drop simulation
-        if (dropProb(gen) < 0.0f) // 10% chance
+        if (dropProb(gen) < drop_val)
         {
             ok = false;
             std::cout << "[Receiver] Random drop seq=" << (int)h.seq << "\n";
@@ -120,8 +122,7 @@ int main()
         {
             if (ok && seq == expectedGbn)
             {
-                std::cout << "[Receiver] Delivered seq=" << (int)seq
-                          << " payload='" << payload << "'\n";
+                std::cout << "[Receiver] Delivered seq=" << (int)seq << "\n";
 
                 uint8_t ack[3] = {0xAC, seq, 1}; // ACK
                 write_exact(fd, ack, sizeof(ack));
@@ -134,7 +135,7 @@ int main()
                 // Out-of-order frames are ignored, send ACK of last in-order received frame
                 uint8_t ack[3] = {0xAC, (uint8_t)(expectedGbn - 1), 1};
                 write_exact(fd, ack, sizeof(ack));
-                std::cout << "[Receiver] Duplicate ACK seq=" << (int)(expectedGbn - 1) << "\n";
+                std::cout << "[Receiver] Duplicate ACK seq=" << (int)(expectedGbn - 1) << " Seq Received:- " << (int)seq << " Expected Seq:- " << (int)expectedGbn << "\n";
             }
         }
         else if (flow == "sr")
@@ -154,8 +155,7 @@ int main()
                 // Deliver in-order frames
                 while (srBuffer.count(expectedSr))
                 {
-                    std::cout << "[Receiver] Delivered seq=" << (int)expectedSr
-                              << " payload='" << srBuffer[expectedSr] << "'\n";
+                    std::cout << "[Receiver] Delivered seq=" << (int)expectedSr << "\n";
                     srBuffer.erase(expectedSr);
                     ++expectedSr;
                 }

@@ -59,8 +59,9 @@ int main()
 
     std::cout << "[Sender] Enter bitstream file: ";
     std::cin >> path;
-    std::cout << "[Sender] Payload size per frame: ";
+    std::cout << "[Sender] Payload size per frame(in Bytes): ";
     std::cin >> payloadLen;
+    payloadLen *= 8;
     std::cout << "[Sender] CRC width (8/10/16/32): ";
     std::cin >> crcBits;
     std::cout << "[Sender] ACK timeout (ms): ";
@@ -291,4 +292,13 @@ int main()
     std::cout << "Total Time: " << durationMs << " ms\n";
     std::cout << "Efficiency (useful frames / total transmissions): " << efficiency << "\n";
     std::cout << "Average Propagation Delay (RTT): " << avgRtt << " ms\n";
+
+    double durationSec = durationMs / 1000.0;      // convert ms to seconds
+    double totalBits = frames.size() * payloadLen; // total useful bits sent
+
+    double throughputMbps = totalBits / durationSec / 1e6;        // bits/sec -> Mbps
+    double effectiveThroughputMbps = throughputMbps * efficiency; // account for retransmissions
+
+    std::cout << "Raw Throughput: " << throughputMbps << " Mbps\n";
+    std::cout << "Effective Throughput: " << effectiveThroughputMbps << " Mbps\n";
 }
