@@ -32,9 +32,7 @@ void handle_client(int client_sock, int id)
             channel_busy_flag = true;
         }
 
-        // Simulate transmission delay
-        this_thread::sleep_for(chrono::milliseconds(20));
-
+        
         send(client_sock, "ACK", 3, 0);
 
         {
