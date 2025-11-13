@@ -20,3 +20,9 @@ bool DNSCache::get(const std::string &key, std::vector<uint8_t> &resp)
     resp = it->second.response;
     return true;
 }
+
+std::unordered_map<std::string, CacheEntry> DNSCache::snapshot()
+{
+    std::lock_guard<std::mutex> lock(mtx);
+    return {cache.begin(), cache.end()};
+}
