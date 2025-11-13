@@ -23,5 +23,6 @@ std::vector<uint8_t> queryUpstream(const std::vector<uint8_t> &query,
 
 uint32_t extractTTL(const std::vector<uint8_t> &response);
 std::string extractDomainName(const std::vector<uint8_t> &query);
+std::string extractIPv4(const std::vector<uint8_t> &response);
 
 #endif

@@ -5,6 +5,74 @@
 #include <iostream>
 #include <cstring>
 
+#include <arpa/inet.h>
+
+std::string extractIPv4(const std::vector<uint8_t> &response)
+{
+    if (response.size() < 12)
+        return "";
+
+    const uint8_t *data = response.data();
+
+    // DNS header fields
+    uint16_t qdCount = ntohs(*(uint16_t *)(data + 4));
+    uint16_t anCount = ntohs(*(uint16_t *)(data + 6));
+
+    size_t offset = 12; // Skip header
+
+    // Skip Question Section
+    while (qdCount--)
+    {
+        // Skip domain name (QNAME)
+        while (offset < response.size() && response[offset] != 0)
+            offset += (response[offset] + 1);
+        offset++; // null terminator
+
+        offset += 4; // QTYPE + QCLASS
+    }
+
+    // Parse Answer Section
+    while (anCount-- && offset < response.size())
+    {
+        // Skip NAME (may use compression)
+        if (response[offset] & 0xC0)
+        {
+            offset += 2; // compressed pointer
+        }
+        else
+        {
+            while (response[offset] != 0)
+                offset += (response[offset] + 1);
+            offset++;
+        }
+
+        // TYPE + CLASS + TTL + RDLENGTH
+        if (offset + 10 > response.size())
+            return "";
+
+        uint16_t type = ntohs(*(uint16_t *)&response[offset]);
+        offset += 2;
+        uint16_t classCode = ntohs(*(uint16_t *)&response[offset]);
+        offset += 2;
+        uint32_t ttl = ntohl(*(uint32_t *)&response[offset]);
+        offset += 4;
+        uint16_t rdLength = ntohs(*(uint16_t *)&response[offset]);
+        offset += 2;
+
+        // If this is an IPv4 A record
+        if (type == 1 && classCode == 1 && rdLength == 4)
+        {
+            struct in_addr addr;
+            memcpy(&addr, &response[offset], 4);
+            return std::string(inet_ntoa(addr));
+        }
+
+        offset += rdLength; // Skip RDATA
+    }
+
+    return "";
+}
+
 std::vector<uint8_t> queryUpstream(const std::vector<uint8_t> &query,
                                    const std::string &dnsServerIP,
                                    int port)

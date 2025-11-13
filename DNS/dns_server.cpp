@@ -144,6 +144,8 @@ void DNSServer::handleClient(int clientSock)
         {
             auto reqHeader = reinterpret_cast<const DNSHeader *>(query.data());
             auto respHeader = reinterpret_cast<DNSHeader *>(response.data());
+
+            std::cout << "\n";
             respHeader->id = reqHeader->id;
         }
     }
@@ -165,10 +167,6 @@ void DNSServer::handleClient(int clientSock)
     close(clientSock);
 }
 
-// =========================================================
-//                   UDP Handler
-// =========================================================
-
 void DNSServer::handleUDP(int udpSock)
 {
     sockaddr_in clientAddr{};
@@ -189,6 +187,10 @@ void DNSServer::handleUDP(int udpSock)
         std::cout << "[Cache Hit] (UDP) " << domain << "\n";
         auto reqHeader = reinterpret_cast<const DNSHeader *>(query.data());
         auto respHeader = reinterpret_cast<DNSHeader *>(response.data());
+        // for (auto i : response)
+        // {
+        //     std::cout << i << " ";
+        // }
         respHeader->id = reqHeader->id;
     }
     else
@@ -204,7 +206,11 @@ void DNSServer::handleUDP(int udpSock)
             cache.store(domain, response, ttl);
         }
     }
-
+    std::string ip = extractIPv4(response);
+    if (!ip.empty())
+    {
+        std::cout << "[Resolved] " << domain << " -> " << ip << "\n";
+    }
     sendto(udpSock, response.data(), response.size(), 0,
            (sockaddr *)&clientAddr, addrLen);
 }

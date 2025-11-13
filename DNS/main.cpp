@@ -1,16 +1,18 @@
 #include "dns_server.h"
 #include "dns_cache_ui.h"
 #include <thread>
+#include <iostream>
 
 int main()
 {
     DNSServer server(8053);
-    auto cache = server.getCache();
+    std::cout << "\033c";
 
-    std::thread uiThread(runCacheUI, cache);
+    std::thread uiThread([&]()
+                         { runCacheUI(server.getCache()); });
 
+    uiThread.detach();
     server.start();
 
-    uiThread.join();
     return 0;
 }
