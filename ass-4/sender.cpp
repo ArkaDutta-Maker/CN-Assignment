@@ -45,7 +45,6 @@ int main()
             return;
         }
 
-        // read "CODE idx L\n" (may come in chunks)
         string hello;
         hello.reserve(64);
         char tmp[64];
@@ -104,7 +103,6 @@ int main()
                 }
                 bits_sent++;
 
-                // wait for ACK (server responds once per slot including this sender)
                 char abuf[16];
                 int n = recv(sock, abuf, sizeof(abuf), 0);
                 if (n > 0)
@@ -119,7 +117,7 @@ int main()
                     bits_acked++;
                     {
                         lock_guard<mutex> lk(cout_mtx);
-                        cout << "[C" << id << "] ACK recv decoded_bit=" << (rec_bit == -1 ? '?' : ('0' + rec_bit)) << "\n";
+                        cout << "[C" << id << "] ACK recv decoded_bit=" << (rec_bit == -1 ? '?' : (rec_bit)) << "\n";
                     }
                 }
             }

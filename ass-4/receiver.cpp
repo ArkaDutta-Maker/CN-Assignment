@@ -38,13 +38,12 @@ int main()
     cout << "CDMA Receiver listening on port " << PORT << " ...\n";
 
     mutex mtx, cout_mtx;
-    vector<pair<int, int>> clients;    // (socket, code_idx)
-    unordered_map<int, int> sock2code; // socket -> code_idx
+    vector<pair<int, int>> clients;
+    unordered_map<int, int> sock2code;
     vector<int> slot_sum(L, 0);
-    vector<int> contrib_codes; // code_idx that sent in current slot
+    vector<int> contrib_codes;
     atomic<bool> running{true};
 
-    // Accept incoming clients
     thread acceptor([&]()
                     {
         int next_code=0;
@@ -61,7 +60,6 @@ int main()
                 sock2code[cs]=code_idx;
             }
 
-            // Tell client its code and L
             string hello="CODE "+to_string(code_idx)+" "+to_string(L)+"\n";
             send(cs,hello.c_str(),(int)hello.size(),0);
 
@@ -70,7 +68,6 @@ int main()
                 cout<<"[ACCEPT] client socket "<<cs<<" -> code "<<code_idx<<"\n";
             }
 
-            // Per-client reader (reads exactly L bytes = one chip frame)
             thread([&,cs,code_idx](){
                 vector<char> buf(L);
                 while(true){
@@ -92,7 +89,6 @@ int main()
                         }
                         got+=n;
                     }
-                    // Accumulate into slot sum
                     {
                         lock_guard<mutex> lk(mtx);
                         for(int i=0;i<L;i++){
@@ -105,7 +101,6 @@ int main()
             }).detach();
         } });
 
-    // Slot scheduler: every slot, decode contributors and ACK
     thread slotter([&]()
                    {
         long long slot_id=0;
@@ -125,7 +120,6 @@ int main()
             sort(contrib_local.begin(),contrib_local.end());
             contrib_local.erase(unique(contrib_local.begin(),contrib_local.end()),contrib_local.end());
 
-            // Pretty-print composite chips for this slot
             {
                 lock_guard<mutex> lk(cout_mtx);
                 cout<<"[SLOT "<<slot_id<<"] composite chips: ";
@@ -133,12 +127,11 @@ int main()
                     int v=sum_local[i];
                     if(v>0) cout<<'+';
                     else if(v<0) cout<<'-';
-                    else cout<<'0'; // zero if even cancellations
+                    else cout<<'0'; 
                 }
                 cout<<"\n";
             }
 
-            // Decode and ACK for each contributor
             for(int code_idx: contrib_local){
                 int bit = decode_bit(sum_local, H[code_idx]);
                 int cs = -1;
