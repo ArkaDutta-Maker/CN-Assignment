@@ -271,13 +271,36 @@ static const char *rootServers[] = {
 };
 
 // Recursively resolve a DNS query starting from root servers
-std::vector<uint8_t> recursiveResolve(const std::vector<uint8_t> &query, int port)
+std::vector<uint8_t> recursiveResolve(const std::vector<uint8_t> &query, int port, DNSCache *cache)
 {
     std::string domain = extractDomainName(query);
     uint16_t queryType = extractQueryType(query); // Extract A or AAAA from original query
     std::vector<std::string> nextServers;
-    for (const char *ip : rootServers)
-        nextServers.push_back(ip);
+
+    // Try to get TLD nameservers from cache first
+    std::string tld = extractTLD(domain);
+    std::vector<std::string> cachedNS;
+    std::map<std::string, std::string> cachedGlue;
+    bool usedNSCache = false;
+
+    if (cache && !tld.empty() && cache->getNS(tld, cachedNS, cachedGlue))
+    {
+        // Use cached TLD nameservers
+        for (const auto &ns : cachedNS)
+        {
+            if (cachedGlue.count(ns))
+                nextServers.push_back(cachedGlue[ns]);
+        }
+        usedNSCache = true;
+    }
+
+    // If no cached NS or no glue IPs, start from root
+    if (nextServers.empty())
+    {
+        for (const char *ip : rootServers)
+            nextServers.push_back(ip);
+    }
+
     int maxDepth = 20;
     std::string currentDomain = domain;
     std::vector<uint8_t> lastResponse;
@@ -584,11 +607,20 @@ std::vector<uint8_t> recursiveResolve(const std::vector<uint8_t> &query, int por
                 found = true;
                 break;
             }
-            // If no A or CNAME, try authority/additional
             std::vector<std::string> nsList = extractAuthorityServers(response);
             std::map<std::string, std::string> ipMap = extractAdditionalIPs(response);
             if (!nsList.empty())
             {
+                if (!usedNSCache && cache && depth == 0 && !nsList.empty())
+                {
+                    std::string responseTLD = extractTLD(currentDomain);
+                    if (!responseTLD.empty())
+                    {
+                        uint32_t nsTTL = extractTTL(response);
+                        cache->storeNS(responseTLD, nsList, ipMap, nsTTL);
+                    }
+                }
+
                 nextServers.clear();
                 for (const std::string &ns : nsList)
                 {
@@ -604,7 +636,7 @@ std::vector<uint8_t> recursiveResolve(const std::vector<uint8_t> &query, int por
                         if (!nsTrim.empty() && nsTrim.back() == '.')
                             nsTrim.pop_back();
                         auto nsQuery = buildQuery(nsTrim);
-                        auto nsResp = recursiveResolve(nsQuery, port);
+                        auto nsResp = recursiveResolve(nsQuery, port, cache);
                         std::string nsIP = extractIPv4(nsResp);
                         if (!nsIP.empty())
                             nextServers.push_back(nsIP);
@@ -1002,4 +1034,22 @@ std::vector<std::string> extractResolutionChain(const std::vector<uint8_t> &resp
     }
 
     return chain;
+}
+
+std::string extractTLD(const std::string &domain)
+{
+    if (domain.empty())
+        return "";
+
+    std::string d = domain;
+    // Remove trailing dot if present
+    if (d.back() == '.')
+        d.pop_back();
+
+    // Find the last dot to get TLD
+    size_t lastDot = d.rfind('.');
+    if (lastDot == std::string::npos)
+        return d + "."; // Already a TLD
+
+    return d.substr(lastDot + 1) + ".";
 }

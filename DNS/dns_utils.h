@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <map>
 #include <unordered_map>
+#include "dns_cache.h"
 
 #pragma pack(push, 1)
 struct DNSHeader
@@ -20,7 +21,7 @@ struct DNSHeader
 #pragma pack(pop)
 
 // Recursively resolve a DNS query starting from root servers
-std::vector<uint8_t> recursiveResolve(const std::vector<uint8_t> &query, int port = 53);
+std::vector<uint8_t> recursiveResolve(const std::vector<uint8_t> &query, int port = 53, DNSCache *cache = nullptr);
 
 uint32_t extractTTL(const std::vector<uint8_t> &response);
 std::string extractDomainName(const std::vector<uint8_t> &query);
@@ -33,4 +34,5 @@ std::vector<std::string> extractAuthorityServers(const std::vector<uint8_t> &res
 std::map<std::string, std::string> extractAdditionalIPs(const std::vector<uint8_t> &response);
 std::vector<uint8_t> buildQuery(const std::string &domain);
 std::vector<uint8_t> buildQuery(const std::string &domain, uint16_t qtype);
+std::string extractTLD(const std::string &domain);
 #endif

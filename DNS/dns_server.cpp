@@ -158,7 +158,7 @@ void DNSServer::handleClient(int clientSock)
         std::cout << "[Cache Miss] (TCP) " << domain << " (Type: " << queryType << ")"
                   << " | Query Size: " << query.size() << " bytes\n";
 
-        response = recursiveResolve(query, 53);
+        response = recursiveResolve(query, 53, &cache);
 
         if (!response.empty())
         {
@@ -221,7 +221,7 @@ void DNSServer::handleUDP(int udpSock)
         std::cout << "[Cache Miss] (UDP) " << domain << " (Type: " << queryType << ")"
                   << " | Query Size: " << query.size() << " bytes\n";
 
-        response = recursiveResolve(query, 53);
+        response = recursiveResolve(query, 53, &cache);
 
         if (!response.empty())
         {
