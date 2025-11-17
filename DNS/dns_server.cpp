@@ -34,96 +34,96 @@ void DNSServer::sendTCPResponse(int clientSock, const std::vector<uint8_t> &resp
     send(clientSock, response.data(), response.size(), 0);
 }
 
-std::vector<uint8_t> DNSServer::queryUpstreamUDP(const std::vector<uint8_t> &query,
-                                                 const std::string &server, int port)
-{
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0)
-        return {};
+// std::vector<uint8_t> DNSServer::queryUpstreamUDP(const std::vector<uint8_t> &query,
+//                                                  const std::string &server, int port)
+// {
+//     int sock = socket(AF_INET, SOCK_DGRAM, 0);
+//     if (sock < 0)
+//         return {};
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    inet_pton(AF_INET, server.c_str(), &addr.sin_addr);
+//     sockaddr_in addr{};
+//     addr.sin_family = AF_INET;
+//     addr.sin_port = htons(port);
+//     inet_pton(AF_INET, server.c_str(), &addr.sin_addr);
 
-    sendto(sock, query.data(), query.size(), 0, (sockaddr *)&addr, sizeof(addr));
+//     sendto(sock, query.data(), query.size(), 0, (sockaddr *)&addr, sizeof(addr));
 
-    uint8_t buffer[512];
-    socklen_t addrLen = sizeof(addr);
-    ssize_t recvLen = recvfrom(sock, buffer, sizeof(buffer), 0, (sockaddr *)&addr, &addrLen);
+//     uint8_t buffer[512];
+//     socklen_t addrLen = sizeof(addr);
+//     ssize_t recvLen = recvfrom(sock, buffer, sizeof(buffer), 0, (sockaddr *)&addr, &addrLen);
 
-    close(sock);
-    if (recvLen <= 0)
-        return {};
+//     close(sock);
+//     if (recvLen <= 0)
+//         return {};
 
-    return std::vector<uint8_t>(buffer, buffer + recvLen);
-}
+//     return std::vector<uint8_t>(buffer, buffer + recvLen);
+// }
 
-std::vector<uint8_t> DNSServer::queryUpstreamTCP(const std::vector<uint8_t> &query,
-                                                 const std::string &server, int port)
-{
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0)
-        return {};
+// std::vector<uint8_t> DNSServer::queryUpstreamTCP(const std::vector<uint8_t> &query,
+//                                                  const std::string &server, int port)
+// {
+//     int sock = socket(AF_INET, SOCK_STREAM, 0);
+//     if (sock < 0)
+//         return {};
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    inet_pton(AF_INET, server.c_str(), &addr.sin_addr);
+//     sockaddr_in addr{};
+//     addr.sin_family = AF_INET;
+//     addr.sin_port = htons(port);
+//     inet_pton(AF_INET, server.c_str(), &addr.sin_addr);
 
-    if (connect(sock, (sockaddr *)&addr, sizeof(addr)) < 0)
-    {
-        close(sock);
-        return {};
-    }
+//     if (connect(sock, (sockaddr *)&addr, sizeof(addr)) < 0)
+//     {
+//         close(sock);
+//         return {};
+//     }
 
-    uint16_t len = htons(query.size());
-    send(sock, &len, sizeof(len), 0);
-    send(sock, query.data(), query.size(), 0);
+//     uint16_t len = htons(query.size());
+//     send(sock, &len, sizeof(len), 0);
+//     send(sock, query.data(), query.size(), 0);
 
-    uint16_t respLen;
-    if (recv(sock, &respLen, sizeof(respLen), MSG_WAITALL) <= 0)
-    {
-        close(sock);
-        return {};
-    }
+//     uint16_t respLen;
+//     if (recv(sock, &respLen, sizeof(respLen), MSG_WAITALL) <= 0)
+//     {
+//         close(sock);
+//         return {};
+//     }
 
-    respLen = ntohs(respLen);
-    std::vector<uint8_t> response(respLen);
+//     respLen = ntohs(respLen);
+//     std::vector<uint8_t> response(respLen);
 
-    if (recv(sock, response.data(), respLen, MSG_WAITALL) <= 0)
-    {
-        close(sock);
-        return {};
-    }
+//     if (recv(sock, response.data(), respLen, MSG_WAITALL) <= 0)
+//     {
+//         close(sock);
+//         return {};
+//     }
 
-    close(sock);
-    return response;
-}
+//     close(sock);
+//     return response;
+// }
 
-std::vector<uint8_t> DNSServer::queryUpstream(const std::vector<uint8_t> &query,
-                                              const std::string &server, int port)
-{
-    auto response = queryUpstreamUDP(query, server, port);
+// std::vector<uint8_t> DNSServer::queryUpstream(const std::vector<uint8_t> &query,
+//                                               const std::string &server, int port)
+// {
+//     auto response = queryUpstreamUDP(query, server, port);
 
-    if (response.size() > 512)
-    {
-        std::cout << "↻ Upstream response >512 bytes — retrying via TCP\n";
-        return queryUpstreamTCP(query, server, port);
-    }
+//     if (response.size() > 512)
+//     {
+//         std::cout << "↻ Upstream response >512 bytes — retrying via TCP\n";
+//         return queryUpstreamTCP(query, server, port);
+//     }
 
-    if (!response.empty())
-    {
-        const DNSHeader *hdr = reinterpret_cast<const DNSHeader *>(response.data());
-        if (ntohs(hdr->flags) & 0x0200)
-        {
-            std::cout << "↻ Truncated UDP response — retrying via TCP\n";
-            return queryUpstreamTCP(query, server, port);
-        }
-    }
+//     if (!response.empty())
+//     {
+//         const DNSHeader *hdr = reinterpret_cast<const DNSHeader *>(response.data());
+//         if (ntohs(hdr->flags) & 0x0200)
+//         {
+//             std::cout << "↻ Truncated UDP response — retrying via TCP\n";
+//             return queryUpstreamTCP(query, server, port);
+//         }
+//     }
 
-    return response;
-}
+//     return response;
+// }
 
 void DNSServer::handleClient(int clientSock)
 {
@@ -146,9 +146,11 @@ void DNSServer::handleClient(int clientSock)
         {
             auto reqHeader = reinterpret_cast<const DNSHeader *>(query.data());
             auto respHeader = reinterpret_cast<DNSHeader *>(response.data());
-
-            std::cout << "\n";
             respHeader->id = reqHeader->id;
+
+            uint16_t flags = ntohs(respHeader->flags);
+            flags &= ~0x0200;
+            respHeader->flags = htons(flags);
         }
     }
     else
@@ -160,9 +162,30 @@ void DNSServer::handleClient(int clientSock)
 
         if (!response.empty())
         {
+            if (response.size() >= sizeof(DNSHeader) && query.size() >= sizeof(DNSHeader))
+            {
+                auto reqHeader = reinterpret_cast<const DNSHeader *>(query.data());
+                auto respHeader = reinterpret_cast<DNSHeader *>(response.data());
+                respHeader->id = reqHeader->id;
+
+                uint16_t flags = ntohs(respHeader->flags);
+                flags &= ~0x0200;
+                respHeader->flags = htons(flags);
+            }
+
             uint32_t ttl = extractTTL(response);
             cache.store(cacheKey, response, ttl);
         }
+    }
+
+    std::cout << "[TCP Response] Size: " << response.size() << " bytes (no size limit)\n";
+
+    std::string ip = extractIPv4(response);
+    if (ip.empty())
+        ip = extractIPv6(response);
+    if (!ip.empty())
+    {
+        std::cout << "[Resolved] " << domain << " -> " << ip << "\n";
     }
 
     sendTCPResponse(clientSock, response);
@@ -210,13 +233,35 @@ void DNSServer::handleUDP(int udpSock)
             cache.store(cacheKey, response, ttl);
         }
     }
-    std::string ip = extractIPv4(response);
-    if (ip.empty())
-        ip = extractIPv6(response);
-    if (!ip.empty())
+
+    if (response.size() >= 512)
     {
-        std::cout << "[Resolved] " << domain << " -> " << ip << "\n";
+        std::cout << "[UDP Truncation] Response size (" << response.size()
+                  << " bytes) >= 512, setting TC bit\n";
+
+        if (response.size() >= sizeof(DNSHeader))
+        {
+            auto respHeader = reinterpret_cast<DNSHeader *>(response.data());
+            uint16_t flags = ntohs(respHeader->flags);
+            flags |= 0x0200;
+            respHeader->flags = htons(flags);
+        }
+
+        response.resize(512);
+
+        std::cout << "[Info] Client should retry with TCP for full response\n";
     }
+    else
+    {
+        std::string ip = extractIPv4(response);
+        if (ip.empty())
+            ip = extractIPv6(response);
+        if (!ip.empty())
+        {
+            std::cout << "[Resolved] " << domain << " -> " << ip << "\n";
+        }
+    }
+
     sendto(udpSock, response.data(), response.size(), 0,
            (sockaddr *)&clientAddr, addrLen);
 }

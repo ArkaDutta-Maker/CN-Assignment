@@ -168,9 +168,8 @@ std::vector<uint8_t> buildQuery(const std::string &domain, uint16_t qtype)
     std::vector<uint8_t> query(sizeof(DNSHeader), 0);
     DNSHeader *hdr = reinterpret_cast<DNSHeader *>(query.data());
     hdr->id = htons(rand() % 65536);
-    hdr->flags = htons(0x0100); // standard query
+    hdr->flags = htons(0x0100);
     hdr->qdcount = htons(1);
-    // Encode domain name
     size_t pos = query.size();
     std::string copy = domain;
     size_t start = 0;

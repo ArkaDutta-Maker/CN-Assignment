@@ -71,7 +71,7 @@ void runCacheUI(DNSCache *cache)
     std::map<std::string, std::pair<std::chrono::steady_clock::time_point, int>> expiredDisplay;
 
     constexpr int W_DOMAIN = 28, W_TYPE = 7, W_VALUE = 39, W_TTL = 7, W_STATUS = 10;
-    const int totalWidth = W_DOMAIN + W_TYPE + W_VALUE + W_TTL + W_STATUS + 6 * 3 + 1; 
+    const int totalWidth = W_DOMAIN + W_TYPE + W_VALUE + W_TTL + W_STATUS + 6 * 3 + 1;
     const std::string sep = "+" + std::string(W_DOMAIN + 2, '-') + "+" + std::string(W_TYPE + 2, '-') + "+" + std::string(W_VALUE + 2, '-') + "+" + std::string(W_TTL + 2, '-') + "+" + std::string(W_STATUS + 2, '-') + "+\n";
 
     while (true)

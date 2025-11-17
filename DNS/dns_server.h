@@ -16,12 +16,12 @@ private:
     std::vector<uint8_t> readTCPQuery(int clientSock);
     void sendTCPResponse(int clientSock, const std::vector<uint8_t> &resp);
 
-    std::vector<uint8_t> queryUpstreamUDP(const std::vector<uint8_t> &query,
-                                          const std::string &server, int port);
-    std::vector<uint8_t> queryUpstreamTCP(const std::vector<uint8_t> &query,
-                                          const std::string &server, int port);
-    std::vector<uint8_t> queryUpstream(const std::vector<uint8_t> &query,
-                                       const std::string &server, int port);
+    // std::vector<uint8_t> queryUpstreamUDP(const std::vector<uint8_t> &query,
+    //                                       const std::string &server, int port);
+    // std::vector<uint8_t> queryUpstreamTCP(const std::vector<uint8_t> &query,
+    //                                       const std::string &server, int port);
+    // std::vector<uint8_t> queryUpstream(const std::vector<uint8_t> &query,
+    //                                    const std::string &server, int port);
 
     void handleClient(int clientSock);
     void handleUDP(int udpSock);
