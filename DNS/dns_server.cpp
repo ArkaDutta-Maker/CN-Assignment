@@ -135,11 +135,13 @@ void DNSServer::handleClient(int clientSock)
     }
 
     std::string domain = extractDomainName(query);
+    uint16_t queryType = extractQueryType(query);
+    std::string cacheKey = domain + "/" + std::to_string(queryType);
     std::vector<uint8_t> response;
 
-    if (cache.get(domain, response))
+    if (cache.get(cacheKey, response))
     {
-        std::cout << "[Cache Hit] (TCP) " << domain << "\n";
+        std::cout << "[Cache Hit] (TCP) " << domain << " (Type: " << queryType << ")\n";
         if (response.size() >= sizeof(DNSHeader) && query.size() >= sizeof(DNSHeader))
         {
             auto reqHeader = reinterpret_cast<const DNSHeader *>(query.data());
@@ -148,10 +150,10 @@ void DNSServer::handleClient(int clientSock)
             std::cout << "\n";
             respHeader->id = reqHeader->id;
         }
-    }
+    }`
     else
     {
-        std::cout << "[Cache Miss] (TCP) " << domain
+        std::cout << "[Cache Miss] (TCP) " << domain << " (Type: " << queryType << ")"
                   << " | Query Size: " << query.size() << " bytes\n";
 
         response = recursiveResolve(query, 53);
@@ -159,7 +161,7 @@ void DNSServer::handleClient(int clientSock)
         if (!response.empty())
         {
             uint32_t ttl = extractTTL(response);
-            cache.store(domain, response, ttl);
+            cache.store(cacheKey, response, ttl);
         }
     }
 
@@ -180,18 +182,20 @@ void DNSServer::handleUDP(int udpSock)
 
     std::vector<uint8_t> query(buffer, buffer + recvLen);
     std::string domain = extractDomainName(query);
+    uint16_t queryType = extractQueryType(query);
+    std::string cacheKey = domain + "/" + std::to_string(queryType);
     std::vector<uint8_t> response;
 
-    if (cache.get(domain, response))
+    if (cache.get(cacheKey, response))
     {
-        std::cout << "[Cache Hit] (UDP) " << domain << "\n";
+        std::cout << "[Cache Hit] (UDP) " << domain << " (Type: " << queryType << ")\n";
         auto reqHeader = reinterpret_cast<const DNSHeader *>(query.data());
         auto respHeader = reinterpret_cast<DNSHeader *>(response.data());
         respHeader->id = reqHeader->id;
     }
     else
     {
-        std::cout << "[Cache Miss] (UDP) " << domain
+        std::cout << "[Cache Miss] (UDP) " << domain << " (Type: " << queryType << ")"
                   << " | Query Size: " << query.size() << " bytes\n";
 
         response = recursiveResolve(query, 53);
@@ -203,7 +207,7 @@ void DNSServer::handleUDP(int udpSock)
             respHeader->id = reqHeader->id;
 
             uint32_t ttl = extractTTL(response);
-            cache.store(domain, response, ttl);
+            cache.store(cacheKey, response, ttl);
         }
     }
     std::string ip = extractIPv4(response);
