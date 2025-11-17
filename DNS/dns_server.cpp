@@ -150,7 +150,7 @@ void DNSServer::handleClient(int clientSock)
             std::cout << "\n";
             respHeader->id = reqHeader->id;
         }
-    }`
+    }
     else
     {
         std::cout << "[Cache Miss] (TCP) " << domain << " (Type: " << queryType << ")"
