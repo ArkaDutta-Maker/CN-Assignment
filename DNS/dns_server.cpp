@@ -187,10 +187,6 @@ void DNSServer::handleUDP(int udpSock)
         std::cout << "[Cache Hit] (UDP) " << domain << "\n";
         auto reqHeader = reinterpret_cast<const DNSHeader *>(query.data());
         auto respHeader = reinterpret_cast<DNSHeader *>(response.data());
-        // for (auto i : response)
-        // {
-        //     std::cout << i << " ";
-        // }
         respHeader->id = reqHeader->id;
     }
     else
@@ -202,11 +198,17 @@ void DNSServer::handleUDP(int udpSock)
 
         if (!response.empty())
         {
+            auto reqHeader = reinterpret_cast<const DNSHeader *>(query.data());
+            auto respHeader = reinterpret_cast<DNSHeader *>(response.data());
+            respHeader->id = reqHeader->id;
+
             uint32_t ttl = extractTTL(response);
             cache.store(domain, response, ttl);
         }
     }
     std::string ip = extractIPv4(response);
+    if (ip.empty())
+        ip = extractIPv6(response);
     if (!ip.empty())
     {
         std::cout << "[Resolved] " << domain << " -> " << ip << "\n";
