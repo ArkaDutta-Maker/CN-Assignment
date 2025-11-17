@@ -3,6 +3,7 @@
 #include <thread>
 #include <chrono>
 #include <map>
+#include <sstream>
 #include "dns_cache_ui.h"
 #include "dns_utils.h"
 static void clearTopLines(int lines)
@@ -69,6 +70,7 @@ void runCacheUI(DNSCache *cache)
 {
     using namespace std::chrono_literals;
     std::map<std::string, std::pair<std::chrono::steady_clock::time_point, int>> expiredDisplay;
+    int lastLineCount = 0;
 
     constexpr int W_DOMAIN = 28, W_TYPE = 7, W_VALUE = 39, W_TTL = 7, W_STATUS = 10;
     const int totalWidth = W_DOMAIN + W_TYPE + W_VALUE + W_TTL + W_STATUS + 6 * 3 + 1;
@@ -77,17 +79,28 @@ void runCacheUI(DNSCache *cache)
     while (true)
     {
         auto snapshot = cache->snapshot();
-        clearTopLines(snapshot.size() + 8);
 
-        std::cout << sep;
-        std::cout << "| " << fitWidth("Domain", W_DOMAIN) << " | "
-                  << fitWidth("Type", W_TYPE) << " | "
-                  << fitWidth("Value", W_VALUE) << " | "
-                  << fitWidth("TTL(s)", W_TTL) << " | "
-                  << fitWidth("Status", W_STATUS) << " |\n";
-        std::cout << sep;
+        if (lastLineCount > 0)
+        {
+            clearTopLines(lastLineCount);
+        }
+
+        std::ostringstream output;
+        int lineCount = 0;
+
+        output << sep;
+        lineCount++;
+        output << "| " << fitWidth("Domain", W_DOMAIN) << " | "
+               << fitWidth("Type", W_TYPE) << " | "
+               << fitWidth("Value", W_VALUE) << " | "
+               << fitWidth("TTL(s)", W_TTL) << " | "
+               << fitWidth("Status", W_STATUS) << " |\n";
+        lineCount++;
+        output << sep;
+        lineCount++;
 
         bool anyActive = false;
+        int entryCount = 0;
 
         for (auto &entry : snapshot)
         {
@@ -95,7 +108,7 @@ void runCacheUI(DNSCache *cache)
             int ttl = timeLeft(entry.second.expiry);
             if (ttl <= 0)
             {
-                expiredDisplay[domain] = {std::chrono::steady_clock::now(), 2};
+                expiredDisplay[domain] = {std::chrono::steady_clock::now(), 3};
                 continue;
             }
             anyActive = true;
@@ -106,11 +119,13 @@ void runCacheUI(DNSCache *cache)
 
             if (chain.empty())
             {
-                std::cout << "| " << fitWidth(domain, W_DOMAIN) << " | "
-                          << fitWidth("-", W_TYPE) << " | "
-                          << fitWidth("-", W_VALUE) << " | "
-                          << fitWidth(std::to_string(ttl), W_TTL) << " | "
-                          << fitWidth(status, W_STATUS) << " |\n";
+                output << "| " << fitWidth(domain, W_DOMAIN) << " | "
+                       << fitWidth("-", W_TYPE) << " | "
+                       << fitWidth("-", W_VALUE) << " | "
+                       << fitWidth(std::to_string(ttl), W_TTL) << " | "
+                       << fitWidth(status, W_STATUS) << " |\n";
+                lineCount++;
+                entryCount++;
                 continue;
             }
 
@@ -130,41 +145,49 @@ void runCacheUI(DNSCache *cache)
                     value = chain[i];
                 }
                 std::string hop = (i == 0 ? domain : "↳ " + value);
-                std::cout << "| " << fitWidth(i == 0 ? domain : "", W_DOMAIN) << " | "
-                          << fitWidth(type, W_TYPE) << " | "
-                          << fitWidth(value, W_VALUE) << " | "
-                          << fitWidth(i == 0 ? std::to_string(ttl) : "", W_TTL) << " | "
-                          << fitWidth(i == 0 ? status : "", W_STATUS) << " |\n";
+                output << "| " << fitWidth(i == 0 ? domain : "", W_DOMAIN) << " | "
+                       << fitWidth(type, W_TYPE) << " | "
+                       << fitWidth(value, W_VALUE) << " | "
+                       << fitWidth(i == 0 ? std::to_string(ttl) : "", W_TTL) << " | "
+                       << fitWidth(i == 0 ? status : "", W_STATUS) << " |\n";
+                lineCount++;
             }
+            entryCount++;
         }
-
-        // Expired entries
         for (auto it = expiredDisplay.begin(); it != expiredDisplay.end();)
         {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                                std::chrono::steady_clock::now() - it->second.first)
                                .count();
-            if (elapsed > it->second.second)
+            if (elapsed >= it->second.second)
             {
                 it = expiredDisplay.erase(it);
                 continue;
             }
-            std::cout << "| " << fitWidth(it->first, W_DOMAIN) << " | "
-                      << fitWidth("-", W_TYPE) << " | "
-                      << fitWidth("-", W_VALUE) << " | "
-                      << fitWidth("0", W_TTL) << " | "
-                      << fitWidth("\033[31m❌Expired\033[0m", W_STATUS) << " |\n";
+            output << "| " << fitWidth(it->first, W_DOMAIN) << " | "
+                   << fitWidth("-", W_TYPE) << " | "
+                   << fitWidth("-", W_VALUE) << " | "
+                   << fitWidth("0", W_TTL) << " | "
+                   << fitWidth("\033[31m❌Expired\033[0m", W_STATUS) << " |\n";
+            lineCount++;
             ++it;
         }
 
         if (!anyActive && expiredDisplay.empty())
         {
             std::string msg = fitWidth("No active cache entries", W_DOMAIN + W_TYPE + W_VALUE + W_TTL + W_STATUS + 6 * 3 + 1 - 6);
-            std::cout << "| " << msg << "|\n";
+            output << "| " << msg << "|\n";
+            lineCount++;
         }
 
-        std::cout << sep;
+        output << sep;
+        lineCount++;
+
+        // Write entire output at once
+        std::cout << output.str();
         std::cout.flush();
+
+        lastLineCount = lineCount;
         std::this_thread::sleep_for(1s);
     }
 }
