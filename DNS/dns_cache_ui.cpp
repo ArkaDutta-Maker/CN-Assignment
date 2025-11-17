@@ -25,23 +25,16 @@ static int timeLeft(const std::chrono::steady_clock::time_point &expiry)
 void runCacheUI(DNSCache *cache)
 {
     using namespace std::chrono_literals;
-
     std::map<std::string, std::pair<std::chrono::steady_clock::time_point, int>> expiredDisplay;
+
     while (true)
     {
         auto snapshot = cache->snapshot();
-
         clearTopLines(snapshot.size() + 6);
 
-        std::cout << "+------------------------------------------------------------------------+\n";
-        std::cout << "|                        LIVE DNS CACHE MONITOR (Auto Refresh)           |\n";
-        std::cout << "+------------------------------------------------------------------------+\n";
-        std::cout << "| " << std::setw(30) << std::left << "Domain"
-                  << "| " << std::setw(15) << std::left << "IPv4"
-                  << "| " << std::setw(8) << std::left << "TTL(s)"
-                  << "| " << std::setw(12) << std::left << "Status"
-                  << "|\n";
-        std::cout << "+------------------------------------------------------------------------+\n";
+        std::cout << "+------------------------------+------------------------------+--------+-----------+\n";
+        std::cout << "| Domain                       | Resolved / Chain             | TTL(s) | Status     |\n";
+        std::cout << "+------------------------------+------------------------------+--------+------------+\n";
 
         bool anyActive = false;
 
@@ -49,7 +42,6 @@ void runCacheUI(DNSCache *cache)
         {
             std::string domain = entry.first;
             int ttl = timeLeft(entry.second.expiry);
-            std::string ipv4 = extractIPv4(entry.second.response);
 
             if (ttl <= 0)
             {
@@ -58,18 +50,25 @@ void runCacheUI(DNSCache *cache)
             }
 
             anyActive = true;
+            auto chain = extractResolutionChain(entry.second.response);
 
             std::string status =
                 (ttl > 30) ? "\033[32mActive\033[0m" : (ttl > 5) ? "\033[33mExpiring\033[0m"
                                                                  : "\033[31mCritical\033[0m";
 
-            std::cout << "| " << std::setw(30) << std::left << domain
-                      << "| " << std::setw(15) << std::left << ipv4
-                      << "| " << std::setw(8) << std::left << ttl
-                      << "| " << std::setw(12) << std::left << status
-                      << "      |\n";
+            for (size_t i = 0; i < chain.size(); ++i)
+            {
+                std::string displayChain = (i == 0) ? chain[i] : "↳ " + chain[i];
+
+                std::cout << "| " << std::setw(30) << std::left << (i == 0 ? domain : "")
+                          << "| " << std::setw(30) << std::left << displayChain
+                          << "| " << std::setw(6) << std::left << (i == 0 ? std::to_string(ttl) : "")
+                          << "| " << std::setw(10) << std::left << (i == 0 ? status : "")
+                          << " |\n";
+            }
         }
 
+        // Expired entries
         for (auto it = expiredDisplay.begin(); it != expiredDisplay.end();)
         {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -82,23 +81,22 @@ void runCacheUI(DNSCache *cache)
             }
 
             std::cout << "| " << std::setw(30) << std::left << it->first
-                      << "| " << std::setw(15) << std::left << "-"
-                      << "| " << std::setw(8) << std::left << "0"
-                      << "| " << std::setw(12) << std::left << "\033[31m❌ Expired\033[0m"
-                      << "      |\n";
+                      << "| " << std::setw(30) << std::left << "-"
+                      << "| " << std::setw(6) << std::left << "0"
+                      << "| " << std::setw(10) << std::left << "\033[31m❌Expired\033[0m"
+                      << " |\n";
             ++it;
         }
 
         if (!anyActive && expiredDisplay.empty())
         {
-            std::cout << "| " << std::setw(71) << std::left << "No active cache entries"
-                      << "|\n";
+            std::cout << "| " << std::setw(82) << std::left << "No active cache entries"
+                      << " |\n";
         }
 
-        std::cout << "+------------------------------------------------------------------------+\n";
+        std::cout << "+------------------------------+------------------------------+--------+------------+\n";
 
         std::cout.flush();
-
         std::this_thread::sleep_for(1s);
     }
 }

@@ -154,7 +154,7 @@ void DNSServer::handleClient(int clientSock)
         std::cout << "[Cache Miss] (TCP) " << domain
                   << " | Query Size: " << query.size() << " bytes\n";
 
-        response = queryUpstream(query, "8.8.8.8", 53);
+        response = recursiveResolve(query, 53);
 
         if (!response.empty())
         {
@@ -198,7 +198,7 @@ void DNSServer::handleUDP(int udpSock)
         std::cout << "[Cache Miss] (UDP) " << domain
                   << " | Query Size: " << query.size() << " bytes\n";
 
-        response = queryUpstream(query, "8.8.8.8", 53);
+        response = recursiveResolve(query, 53);
 
         if (!response.empty())
         {
@@ -214,11 +214,6 @@ void DNSServer::handleUDP(int udpSock)
     sendto(udpSock, response.data(), response.size(), 0,
            (sockaddr *)&clientAddr, addrLen);
 }
-
-// =========================================================
-//                   UDP Listener
-// =========================================================
-
 void DNSServer::udpListener()
 {
     int udpSock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -248,10 +243,6 @@ void DNSServer::udpListener()
     while (true)
         handleUDP(udpSock);
 }
-
-// =========================================================
-//                   Server Startup
-// =========================================================
 
 void DNSServer::start()
 {
